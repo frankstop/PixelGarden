@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel Garden</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; padding: 0; background: #141b11; }
+  a { color: #a4d47a; }
+  a:hover { color: #cdeea8; }
+  @keyframes toastIn { from { transform: translateY(-10px); opacity: 0; } to { transform: none; opacity: 1; } }
+</style>
+</helmet>
+<div data-screen-label="Pixel Garden" style="min-height:100vh;background:#141b11;color:#d8e6c6;font-family:'VT323',monospace;display:flex;flex-direction:column;align-items:center;gap:18px;padding:32px 16px 56px;box-sizing:border-box;">
+
+  <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+    <h1 style="margin:0;font-family:'Press Start 2P',monospace;font-size:22px;color:#a4d47a;letter-spacing:2px;text-shadow:0 3px 0 #0b110a;">PIXEL GARDEN</h1>
+    <p style="margin:0;font-size:19px;color:#7f9468;">plants keep growing in real time — even with the tab closed</p>
+  </div>
+
+  <sc-if value="{{ hasAway }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex;align-items:center;gap:14px;background:#2a3a22;border:3px solid #5d7a44;padding:10px 16px;font-size:19px;color:#d8e6c6;animation:toastIn 0.35s ease-out;">
+      <span>{{ awayMsg }}</span>
+      <button onClick="{{ dismissAway }}" style="font-family:'Press Start 2P',monospace;font-size:10px;background:#5d7a44;color:#141b11;border:none;padding:8px 12px;cursor:pointer;">OK</button>
+    </div>
+  </sc-if>
+
+  <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center;">
+    <div style="display:flex;align-items:center;gap:8px;background:#232e1c;border:3px solid #3a4a2c;padding:8px 14px;">
+      <span style="width:14px;height:14px;background:#e8c84a;box-shadow:inset -3px -3px 0 #b3922a;"></span>
+      <span style="font-family:'Press Start 2P',monospace;font-size:14px;color:#e8c84a;">{{ coins }}</span>
+    </div>
+    <sc-if value="{{ isFast }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#232e1c;border:3px solid #3a4a2c;padding:8px 14px;font-size:18px;color:#e0a04a;">TIME-LAPSE ×{{ speedX }}</div>
+    </sc-if>
+  </div>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;max-width:780px;">
+    <sc-for list="{{ seeds }}" as="s" hint-placeholder-count="5">
+      <button onClick="{{ s.select }}" style="{{ s.btnStyle }}">
+        <span style="{{ s.swatchStyle }}"></span>
+        <span style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;">
+          <span style="font-family:'Press Start 2P',monospace;font-size:9px;">{{ s.name }}</span>
+          <span style="font-size:16px;opacity:0.75;">{{ s.cost }}¢ · {{ s.time }}</span>
+        </span>
+      </button>
+    </sc-for>
+  </div>
+
+  <canvas ref="{{ setCanvas }}" width="740" height="360" onClick="{{ onPlotClick }}" onMouseMove="{{ onMove }}" onMouseLeave="{{ onLeave }}" style="width:100%;max-width:740px;image-rendering:pixelated;background:#1c2515;border:4px solid #3a4a2c;cursor:pointer;display:block;box-sizing:border-box;"></canvas>
+
+  <p style="margin:0;font-size:18px;color:#5f7050;text-align:center;max-width:620px;">click a plot to plant · blooms pay out when harvested · leave a bloom too long and weeds move in · your garden is saved automatically</p>
+
+  <sc-if value="{{ tipShow }}" hint-placeholder-val="{{ false }}">
+    <div style="{{ tipStyle }}">{{ tipText }}</div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;speed&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;default&quot;:1,&quot;min&quot;:1,&quot;max&quot;:600,&quot;step&quot;:1,&quot;unit&quot;:&quot;×&quot;,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Simulation&quot;,&quot;description&quot;:&quot;Time-lapse multiplier — crank it up to watch growth in seconds&quot;},&quot;weeds&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Simulation&quot;,&quot;description&quot;:&quot;Weeds overtake blooms left unharvested too long&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.KEY = 'pixelGardenSave_v1';
+    this.COLS = 7; this.ROWS = 3;
+    this.CELLW = 100; this.CELLH = 112;
+    this.OX = 20; this.OY = 12;
+    this.PX = 6;
+    this.state = { coins: 20, plots: Array(21).fill(null), sel: 'daisy', tip: null, away: null };
+    this.cv = null;
+    this.setCanvas = (el) => { this.cv = el; if (el) this.draw(); };
+
+    this.SP = [
+      { id: 'daisy', name: 'DAISY', cost: 5, yld: 14, bloomMin: 2, time: '2 MIN', f: '#f2f0e4', c: '#e8c84a' },
+      { id: 'tulip', name: 'TULIP', cost: 12, yld: 34, bloomMin: 15, time: '15 MIN', f: '#e0575b', c: '#f0a3a5' },
+      { id: 'rose', name: 'ROSE', cost: 30, yld: 90, bloomMin: 60, time: '1 HR', f: '#c94f6d', c: '#e88aa0' },
+      { id: 'sunflower', name: 'SUNFLOWER', cost: 70, yld: 230, bloomMin: 360, time: '6 HR', f: '#e8c84a', c: '#7a5230' },
+      { id: 'moonbloom', name: 'MOONBLOOM', cost: 160, yld: 600, bloomMin: 1440, time: '24 HR', f: '#cfd8f5', c: '#8ea4e8' }
+    ];
+
+    this.MAPS = {
+      seed: [
+        '............','............','............','............',
+        '............','............','............','............',
+        '.....oo.....','....o..o....','.....oo.....','............'
+      ],
+      sprout: [
+        '............','............','............','............',
+        '............','............','......g.....','......g.....',
+        '..ll..g.....','...ll.g.ll..','.....gg.ll..','......g.....'
+      ],
+      bud: [
+        '............','............','............','.....FF.....',
+        '....FFFF....','....dFFd....','.....gg.....','......g.....',
+        '..ll..g.....','...ll.g.ll..','.....gg.ll..','......g.....'
+      ],
+      weed: [
+        '............','............','..w....w....','..w.w..w..w.',
+        '...ww.ww..w.','...w.ww..ww.','....www.ww..','..w..wwww...',
+        '...ww.ww....','..w.www.w...','....ww.w....','...wwww.....'
+      ],
+      daisy: [
+        '............','.....F......','...F...F....','....FCF.....',
+        '..F.CCC.F...','....FCF.....','...F...F....','.....F......',
+        '......g.....','..ll..g.....','...ll.g.ll..','......g.....'
+      ],
+      tulip: [
+        '............','............','....F..F....','....FFFF....',
+        '....FFFF....','....FCFF....','.....gg.....','......g.....',
+        '..ll..g.....','...ll.g.ll..','.....gg.....','......g.....'
+      ],
+      rose: [
+        '............','....FFF.....','...FCFFF....','...FFCFF....',
+        '...FFFCF....','....FFF.....','......g.....','......g.....',
+        '..ll..g.....','...ll.g.ll..','.....gg.....','......g.....'
+      ],
+      sunflower: [
+        '....FFFF....','...FFFFFF...','..FFCCCCFF..','..FCCCCCCF..',
+        '..FCCCCCCF..','..FFCCCCFF..','...FFFFFF...','....FFFF....',
+        '......g.....','..ll..g.....','...ll.g.ll..','......g.....'
+      ],
+      moonbloom: [
+        '.....C......','....CFC.....','...CFFFC....','..CFFFFFC...',
+        '...CFFFC....','....CFC.....','.....C......','......g.....',
+        '......g.....','..ll..g.....','...ll.g.ll..','......g.....'
+      ]
+    };
+
+    this.onPlotClick = (e) => this.handleClick(e);
+    this.onMove = (e) => this.handleMove(e);
+    this.onLeave = () => { if (this.state.tip) this.setState({ tip: null }); };
+    this.dismissAway = () => this.setState({ away: null });
+  }
+
+  speed() { const s = Number(this.props.speed); return (isFinite(s) && s >= 1) ? s : 1; }
+  weedsOn() { return this.props.weeds ?? true; }
+  sp(id) { return this.SP.find(s => s.id === id) || this.SP[0]; }
+
+  componentDidMount() {
+    try {
+      const raw = localStorage.getItem(this.KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        const plots = Array.isArray(d.plots) ? d.plots.slice(0, 21) : [];
+        while (plots.length < 21) plots.push(null);
+        const away = this.awayReport(d.lastVisit, plots);
+        this.setState({ coins: (typeof d.coins === 'number' ? d.coins : 20), plots, sel: d.sel || 'daisy', away }, () => this.draw());
+      }
+    } catch (err) {}
+    this.timer = setInterval(() => this.draw(), 250);
+    this.saver = setInterval(() => this.save(), 5000);
+    this.onUnload = () => this.save();
+    window.addEventListener('beforeunload', this.onUnload);
+  }
+
+  componentWillUnmount() {
+    clearInterval(this.timer); clearInterval(this.saver);
+    window.removeEventListener('beforeunload', this.onUnload);
+    this.save();
+  }
+
+  save() {
+    try {
+      localStorage.setItem(this.KEY, JSON.stringify({
+        coins: this.state.coins, plots: this.state.plots, sel: this.state.sel, lastVisit: Date.now()
+      }));
+    } catch (err) {}
+  }
+
+  bloomMs(sp) { return sp.bloomMin * 60000 / this.speed(); }
+
+  stageOf(plot, now) {
+    const sp = this.sp(plot.sp);
+    const t = (now - plot.plantedAt) / this.bloomMs(sp);
+    if (t < 0.12) return { stage: 'seed', t };
+    if (t < 0.5) return { stage: 'sprout', t };
+    if (t < 1) return { stage: 'bud', t };
+    if (!this.weedsOn() || t < 3) return { stage: 'bloom', t };
+    return { stage: 'weed', t };
+  }
+
+  awayReport(lastVisit, plots) {
+    if (!lastVisit) return null;
+    const now = Date.now();
+    if (now - lastVisit < 60000) return null;
+    let bloomed = 0, overgrown = 0;
+    plots.forEach(p => {
+      if (!p) return;
+      const bAt = p.plantedAt + this.bloomMs(this.sp(p.sp));
+      const wAt = p.plantedAt + this.bloomMs(this.sp(p.sp)) * 3;
+      if (bAt > lastVisit && bAt <= now) bloomed++;
+      if (this.weedsOn() && wAt > lastVisit && wAt <= now) { overgrown++; bloomed = Math.max(0, bloomed - 1); }
+    });
+    if (!bloomed && !overgrown) return null;
+    const parts = [];
+    if (bloomed) parts.push(bloomed + (bloomed === 1 ? ' FLOWER BLOOMED' : ' FLOWERS BLOOMED'));
+    if (overgrown) parts.push(overgrown + ' OVERGROWN BY WEEDS');
+    return 'WHILE YOU WERE AWAY: ' + parts.join(' · ');
+  }
+
+  plotAt(e) {
+    if (!this.cv) return -1;
+    const r = this.cv.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (this.cv.width / r.width);
+    const y = (e.clientY - r.top) * (this.cv.height / r.height);
+    const col = Math.floor((x - this.OX) / this.CELLW);
+    const row = Math.floor((y - this.OY) / this.CELLH);
+    if (col < 0 || col >= this.COLS || row < 0 || row >= this.ROWS) return -1;
+    return row * this.COLS + col;
+  }
+
+  handleClick(e) {
+    const i = this.plotAt(e);
+    if (i < 0) return;
+    const now = Date.now();
+    const plots = this.state.plots.slice();
+    let coins = this.state.coins;
+    const p = plots[i];
+    if (!p) {
+      const sp = this.sp(this.state.sel);
+      if (coins >= sp.cost) { coins -= sp.cost; plots[i] = { sp: sp.id, plantedAt: now }; }
+    } else {
+      const { stage } = this.stageOf(p, now);
+      if (stage === 'bloom') { coins += this.sp(p.sp).yld; plots[i] = null; }
+      else if (stage === 'weed') { coins += 2; plots[i] = null; }
+      else return;
+    }
+    if (coins < 5 && plots.every(x => x === null)) coins = 5;
+    this.setState({ coins, plots, tip: null }, () => { this.save(); this.draw(); });
+  }
+
+  handleMove(e) {
+    const i = this.plotAt(e);
+    let text = null;
+    if (i >= 0) {
+      const p = this.state.plots[i];
+      if (!p) {
+        const sp = this.sp(this.state.sel);
+        text = 'PLANT ' + sp.name + ' (' + sp.cost + '\u00A2)';
+      } else {
+        const sp = this.sp(p.sp);
+        const { stage, t } = this.stageOf(p, Date.now());
+        if (stage === 'bloom') text = 'HARVEST ' + sp.name + ' (+' + sp.yld + '\u00A2)';
+        else if (stage === 'weed') text = 'OVERGROWN \u2014 CLICK TO CLEAR (+2\u00A2)';
+        else text = sp.name + ' \u2014 ' + Math.floor(Math.min(t, 1) * 100) + '% GROWN';
+      }
+    }
+    const old = this.state.tip;
+    if (!text) { if (old) this.setState({ tip: null }); return; }
+    if (!old || old.text !== text || Math.abs(old.x - e.clientX) > 6 || Math.abs(old.y - e.clientY) > 6) {
+      this.setState({ tip: { x: e.clientX, y: e.clientY, text } });
+    }
+  }
+
+  drawMap(ctx, map, legend, x, y) {
+    for (let r = 0; r < map.length; r++) {
+      const row = map[r];
+      for (let c = 0; c < row.length; c++) {
+        const col = legend[row[c]];
+        if (!col) continue;
+        ctx.fillRect(x + c * this.PX, y + r * this.PX, this.PX, this.PX);
+        ctx.fillStyle = col;
+        ctx.fillRect(x + c * this.PX, y + r * this.PX, this.PX, this.PX);
+      }
+    }
+  }
+
+  draw() {
+    const cv = this.cv;
+    if (!cv) return;
+    const ctx = cv.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    const now = Date.now();
+    ctx.fillStyle = '#1c2515';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    for (let i = 0; i < this.COLS * this.ROWS; i++) {
+      const cx = this.OX + (i % this.COLS) * this.CELLW;
+      const cy = this.OY + Math.floor(i / this.COLS) * this.CELLH;
+      const soilTop = cy + this.CELLH - 28;
+      ctx.fillStyle = '#2a1f16';
+      ctx.fillRect(cx + 8, soilTop + 4, this.CELLW - 16, 20);
+      ctx.fillStyle = '#3a2b1f';
+      ctx.fillRect(cx + 8, soilTop, this.CELLW - 16, 20);
+      ctx.fillStyle = '#4a3828';
+      for (let k = 0; k < 5; k++) {
+        const sx = cx + 14 + ((i * 37 + k * 23) % (this.CELLW - 30));
+        const sy = soilTop + 4 + ((i * 13 + k * 7) % 12);
+        ctx.fillRect(sx, sy, 3, 3);
+      }
+      const p = this.state.plots[i];
+      const spriteX = cx + (this.CELLW - 12 * this.PX) / 2;
+      const spriteY = soilTop + 8 - 12 * this.PX;
+      if (!p) {
+        ctx.fillStyle = 'rgba(216,230,198,0.10)';
+        ctx.fillRect(cx + this.CELLW / 2 - 2, soilTop + 6, 4, 8);
+        ctx.fillRect(cx + this.CELLW / 2 - 4, soilTop + 8, 8, 4);
+        continue;
+      }
+      const sp = this.sp(p.sp);
+      const { stage, t } = this.stageOf(p, now);
+      const legend = { g: '#4e8f3f', d: '#2f5f2f', l: '#7cbf58', o: '#c9a35c', w: '#6f8f3a', F: sp.f, C: sp.c };
+      const map = (stage === 'bloom') ? this.MAPS[sp.id] : this.MAPS[stage];
+      this.drawMap(ctx, map, legend, spriteX, spriteY);
+      if (stage === 'seed' || stage === 'sprout' || stage === 'bud') {
+        const w = Math.floor((this.CELLW - 40) * Math.min(t, 1));
+        ctx.fillStyle = '#141b11';
+        ctx.fillRect(cx + 20, cy + this.CELLH - 4, this.CELLW - 40, 3);
+        ctx.fillStyle = '#7cbf58';
+        ctx.fillRect(cx + 20, cy + this.CELLH - 4, w, 3);
+      }
+      if (stage === 'bloom') {
+        const ph = Math.floor(now / 350);
+        for (let k = 0; k < 2; k++) {
+          if ((ph + i + k * 2) % 4 === 0) {
+            const tx = spriteX + ((i * 29 + k * 41) % 60) + 6;
+            const ty = spriteY + ((i * 17 + k * 31) % 40);
+            ctx.fillStyle = 'rgba(255,255,240,0.9)';
+            ctx.fillRect(tx, ty, 3, 3);
+          }
+        }
+      }
+      if (stage === 'weed') {
+        ctx.fillStyle = 'rgba(111,143,58,0.25)';
+        ctx.fillRect(cx + 6, cy + 6, this.CELLW - 12, this.CELLH - 12);
+      }
+    }
+  }
+
+  renderVals() {
+    const sel = this.state.sel;
+    const coins = this.state.coins;
+    const seeds = this.SP.map(sp => {
+      const isSel = sp.id === sel;
+      const afford = coins >= sp.cost;
+      return {
+        name: sp.name, cost: sp.cost, time: sp.time,
+        select: () => this.setState({ sel: sp.id }, () => this.save()),
+        btnStyle: {
+          display: 'flex', alignItems: 'center', gap: '10px',
+          fontFamily: "'VT323', monospace", color: '#d8e6c6',
+          background: isSel ? '#33422a' : '#232e1c',
+          border: '3px solid ' + (isSel ? '#a4d47a' : '#3a4a2c'),
+          padding: '8px 12px', cursor: 'pointer',
+          opacity: afford ? 1 : 0.45, textAlign: 'left'
+        },
+        swatchStyle: {
+          width: '18px', height: '18px', flexShrink: 0,
+          background: sp.f, boxShadow: 'inset -4px -4px 0 rgba(0,0,0,0.3)'
+        }
+      };
+    });
+    const tip = this.state.tip;
+    const spd = this.speed();
+    return {
+      coins, seeds,
+      setCanvas: this.setCanvas,
+      onPlotClick: this.onPlotClick,
+      onMove: this.onMove,
+      onLeave: this.onLeave,
+      hasAway: !!this.state.away,
+      awayMsg: this.state.away || '',
+      dismissAway: this.dismissAway,
+      isFast: spd > 1,
+      speedX: spd,
+      tipShow: !!tip,
+      tipText: tip ? tip.text : '',
+      tipStyle: tip ? {
+        position: 'fixed', left: (tip.x + 14) + 'px', top: (tip.y + 14) + 'px',
+        background: '#0b110a', border: '2px solid #5d7a44', color: '#d8e6c6',
+        fontFamily: "'VT323', monospace", fontSize: '18px',
+        padding: '4px 10px', pointerEvents: 'none', zIndex: 50, whiteSpace: 'nowrap'
+      } : {}
+    };
+  }
+}
+</script>
+</body>
+</html>
