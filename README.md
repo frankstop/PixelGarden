@@ -25,3 +25,15 @@ Any static host works. Locally:
 Repo Settings → Pages → Build and deployment → Source: **Deploy from a branch**,
 Branch: **main** / **/ (root)**. The site publishes at
 `https://<user>.github.io/PixelGarden/`.
+
+## Analytics
+
+Google Analytics (GA4, measurement ID `G-RSVR6Y389R`) is loaded in `index.html`.
+Page views are collected automatically; gameplay also fires custom events:
+
+| Event | Fires when | Parameters |
+| --- | --- | --- |
+| `plant_seed` | A seed is planted in an empty plot | `seed_name`, `cost` |
+| `harvest_bloom` | A fully bloomed plant is harvested | `seed_name`, `coins_earned` |
+| `clear_weed` | An overgrown plot is cleared | `coins_earned` |
+| `select_seed` | A different seed type is selected in the picker | `seed_name` |

@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pixel Garden</title>
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-RSVR6Y389R"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-RSVR6Y389R');
+</script>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -139,6 +146,11 @@ class Component extends DCLogic {
     this.dismissAway = () => this.setState({ away: null });
   }
 
+  track(eventName, params) {
+    if (typeof window.gtag !== 'function') return;
+    try { window.gtag('event', eventName, params || {}); } catch (err) {}
+  }
+
   speed() { const s = Number(this.props.speed); return (isFinite(s) && s >= 1) ? s : 1; }
   weedsOn() { return this.props.weeds ?? true; }
   sp(id) { return this.SP.find(s => s.id === id) || this.SP[0]; }
@@ -225,11 +237,18 @@ class Component extends DCLogic {
     const p = plots[i];
     if (!p) {
       const sp = this.sp(this.state.sel);
-      if (coins >= sp.cost) { coins -= sp.cost; plots[i] = { sp: sp.id, plantedAt: now }; }
+      if (coins >= sp.cost) {
+        coins -= sp.cost; plots[i] = { sp: sp.id, plantedAt: now };
+        this.track('plant_seed', { seed_name: sp.id, cost: sp.cost });
+      }
     } else {
       const { stage } = this.stageOf(p, now);
-      if (stage === 'bloom') { coins += this.sp(p.sp).yld; plots[i] = null; }
-      else if (stage === 'weed') { coins += 2; plots[i] = null; }
+      if (stage === 'bloom') {
+        const sp = this.sp(p.sp);
+        coins += sp.yld; plots[i] = null;
+        this.track('harvest_bloom', { seed_name: sp.id, coins_earned: sp.yld });
+      }
+      else if (stage === 'weed') { coins += 2; plots[i] = null; this.track('clear_weed', { coins_earned: 2 }); }
       else return;
     }
     if (coins < 5 && plots.every(x => x === null)) coins = 5;
@@ -341,7 +360,7 @@ class Component extends DCLogic {
       const afford = coins >= sp.cost;
       return {
         name: sp.name, cost: sp.cost, time: sp.time,
-        select: () => this.setState({ sel: sp.id }, () => this.save()),
+        select: () => this.setState({ sel: sp.id }, () => { this.save(); this.track('select_seed', { seed_name: sp.id }); }),
         btnStyle: {
           display: 'flex', alignItems: 'center', gap: '10px',
           fontFamily: "'VT323', monospace", color: '#d8e6c6',
