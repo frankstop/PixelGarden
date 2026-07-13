@@ -102,11 +102,14 @@
   var KEY = 'pixelGardenSave_v1';
   var COLS = 7, ROWS = 3, CELLW = 100, CELLH = 112, OX = 20, OY = 12, PX = 6;
 
-  // Time-lapse multiplier for testing: open the page with ?speed=60 etc. (1–600)
+  // Time-lapse multiplier: open the page with ?speed=60 etc. Out-of-range
+  // values are clamped to 1–600 rather than silently dropped to 1×, so a
+  // ?speed=6000 URL still runs fast instead of stranding planted crops.
   var SPEED = (function () {
     var m = /[?&]speed=(\d+)/.exec(location.search);
     var s = m ? Number(m[1]) : 1;
-    return (isFinite(s) && s >= 1 && s <= 600) ? s : 1;
+    if (!isFinite(s)) return 1;
+    return Math.min(Math.max(s, 1), 600);
   })();
   var WEEDS = true;
 
@@ -168,6 +171,23 @@
 
   var state = { coins: 20, plots: emptyPlots(), sel: 'daisy' };
   var storageOk = true;
+  var lastTick = Date.now();
+
+  // Growth is stored per plot as an accumulated fraction of bloom time
+  // (1 = bloom, 3 = weeds), not as a planted-at timestamp. A timestamp only
+  // works if SPEED never changes: replaying it through a different ?speed=
+  // on the next visit rescales all past growth and can wipe out progress.
+  // Accumulated progress is monotonic no matter how SPEED varies per visit.
+  function tick() {
+    var now = Date.now();
+    var dt = now - lastTick;
+    lastTick = now;
+    if (dt <= 0) return;
+    for (var i = 0; i < state.plots.length; i++) {
+      var p = state.plots[i];
+      if (p) p.progress += dt / bloomMs(sp(p.sp));
+    }
+  }
 
   function emptyPlots() {
     var a = [];
@@ -187,9 +207,8 @@
 
   function bloomMs(s) { return s.bloomMin * 60000 / SPEED; }
 
-  function stageOf(plot, now) {
-    var s = sp(plot.sp);
-    var t = (now - plot.plantedAt) / bloomMs(s);
+  function stageOf(plot) {
+    var t = plot.progress;
     if (t < 0.12) return { stage: 'seed', t: t };
     if (t < 0.5) return { stage: 'sprout', t: t };
     if (t < 1) return { stage: 'bud', t: t };
@@ -216,34 +235,44 @@
       var raw = localStorage.getItem(KEY);
       if (!raw) return;
       var d = JSON.parse(raw);
-      var plots = Array.isArray(d.plots) ? d.plots.slice(0, COLS * ROWS) : [];
-      while (plots.length < COLS * ROWS) plots.push(null);
+      var now = Date.now();
+      var awayMs = (typeof d.lastVisit === 'number') ? Math.max(0, now - d.lastVisit) : 0;
+      var rawPlots = Array.isArray(d.plots) ? d.plots : [];
+      var plots = [];
+      var bloomed = 0, overgrown = 0;
+      for (var i = 0; i < COLS * ROWS; i++) {
+        var p = rawPlots[i];
+        if (!p || !p.sp) { plots.push(null); continue; }
+        var s = sp(p.sp);
+        var before;
+        if (typeof p.progress === 'number' && isFinite(p.progress)) {
+          before = Math.max(0, p.progress);
+        } else if (typeof p.plantedAt === 'number' && isFinite(p.plantedAt)) {
+          // Legacy save (pre-progress format): estimate growth as of the
+          // last visit with the current SPEED, the same way the old code did.
+          var ref = (typeof d.lastVisit === 'number') ? d.lastVisit : now;
+          before = Math.max(0, (ref - p.plantedAt) / bloomMs(s));
+        } else {
+          plots.push(null);
+          continue;
+        }
+        var after = before + awayMs / bloomMs(s);
+        if (before < 1 && after >= 1) bloomed++;
+        if (WEEDS && before < 3 && after >= 3) { overgrown++; bloomed = Math.max(0, bloomed - 1); }
+        plots.push({ sp: s.id, progress: after });
+      }
       state.coins = (typeof d.coins === 'number') ? d.coins : 20;
       state.plots = plots;
       state.sel = d.sel || 'daisy';
-      showAway(awayReport(d.lastVisit, plots));
+      if (awayMs >= 60000 && (bloomed || overgrown)) {
+        var parts = [];
+        if (bloomed) parts.push(bloomed + (bloomed === 1 ? ' FLOWER BLOOMED' : ' FLOWERS BLOOMED'));
+        if (overgrown) parts.push(overgrown + ' OVERGROWN BY WEEDS');
+        showAway('WHILE YOU WERE AWAY: ' + parts.join(' · '));
+      }
     } catch (err) {
       console.warn('Pixel Garden: could not load save —', err);
     }
-  }
-
-  function awayReport(lastVisit, plots) {
-    if (!lastVisit) return null;
-    var now = Date.now();
-    if (now - lastVisit < 60000) return null;
-    var bloomed = 0, overgrown = 0;
-    plots.forEach(function (p) {
-      if (!p) return;
-      var bAt = p.plantedAt + bloomMs(sp(p.sp));
-      var wAt = p.plantedAt + bloomMs(sp(p.sp)) * 3;
-      if (bAt > lastVisit && bAt <= now) bloomed++;
-      if (WEEDS && wAt > lastVisit && wAt <= now) { overgrown++; bloomed = Math.max(0, bloomed - 1); }
-    });
-    if (!bloomed && !overgrown) return null;
-    var parts = [];
-    if (bloomed) parts.push(bloomed + (bloomed === 1 ? ' FLOWER BLOOMED' : ' FLOWERS BLOOMED'));
-    if (overgrown) parts.push(overgrown + ' OVERGROWN BY WEEDS');
-    return 'WHILE YOU WERE AWAY: ' + parts.join(' · ');
   }
 
   // ---------- DOM ----------
@@ -323,17 +352,17 @@
   cv.addEventListener('click', function (e) {
     var i = plotAt(e);
     if (i < 0) return;
-    var now = Date.now();
+    tick();
     var p = state.plots[i];
     if (!p) {
       var s = sp(state.sel);
       if (state.coins >= s.cost) {
         state.coins -= s.cost;
-        state.plots[i] = { sp: s.id, plantedAt: now };
+        state.plots[i] = { sp: s.id, progress: 0 };
         track('plant_seed', { seed_name: s.id, cost: s.cost });
       }
     } else {
-      var st = stageOf(p, now).stage;
+      var st = stageOf(p).stage;
       if (st === 'bloom') {
         var sb = sp(p.sp);
         state.coins += sb.yld;
@@ -368,7 +397,7 @@
         text = 'PLANT ' + s.name + ' (' + s.cost + '¢)';
       } else {
         var s2 = sp(p.sp);
-        var r = stageOf(p, Date.now());
+        var r = stageOf(p);
         if (r.stage === 'bloom') text = 'HARVEST ' + s2.name + ' (+' + s2.yld + '¢)';
         else if (r.stage === 'weed') text = 'OVERGROWN — CLICK TO CLEAR (+2¢)';
         else text = s2.name + ' — ' + Math.floor(Math.min(r.t, 1) * 100) + '% GROWN';
@@ -401,6 +430,7 @@
   }
 
   function draw() {
+    tick();
     ctx.imageSmoothingEnabled = false;
     var now = Date.now();
     ctx.fillStyle = '#1c2515';
@@ -429,7 +459,7 @@
         continue;
       }
       var s = sp(p.sp);
-      var res = stageOf(p, now);
+      var res = stageOf(p);
       var stage = res.stage, t = res.t;
       var legend = { g: '#4e8f3f', d: '#2f5f2f', l: '#7cbf58', o: '#c9a35c', w: '#6f8f3a', F: s.f, C: s.c };
       var map = (stage === 'bloom') ? MAPS[s.id] : MAPS[stage];
