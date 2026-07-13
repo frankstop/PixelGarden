@@ -36,3 +36,6 @@ Page views are collected automatically; gameplay also fires custom events:
 | `harvest_bloom` | A fully bloomed plant is harvested | `seed_name`, `coins_earned` |
 | `clear_weed` | An overgrown plot is cleared | `coins_earned` |
 | `select_seed` | A different seed type is selected in the picker | `seed_name` |
+
+## Cheat
+ https://frankstop.github.io/PixelGarden/?speed=60
