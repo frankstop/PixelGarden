@@ -4,8 +4,8 @@ A tiny pixel-art idle gardening toy. Plant seeds, let them grow in real time —
 they keep growing even while the tab is closed — then harvest blooms for coins.
 Progress saves automatically to your browser's local storage.
 
-Built as a Claude Design Component (`.dc.html`) rendered by the bundled
-`support.js` runtime, which loads React and Babel from a CDN at page load.
+The whole game is a single self-contained `index.html` — no build step, no
+runtime, no dependencies beyond the web fonts and analytics it loads itself.
 
 ## Run it
 
@@ -16,8 +16,7 @@ Any static host works. Locally:
 
 ## Files
 
-- `index.html` — the Design Component (garden UI + game logic)
-- `support.js` — the dc-runtime that renders it
+- `index.html` — the entire game (garden UI + game logic)
 - `.nojekyll` — tells GitHub Pages to serve files as-is
 
 ## Deploy on GitHub Pages
