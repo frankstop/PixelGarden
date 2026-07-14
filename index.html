@@ -4,13 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pixel Garden</title>
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-RSVR6Y389R"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-RSVR6Y389R');
-</script>
+<script src="https://frankiejvaldez.com/assets/js/embed-analytics.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
 <style>
@@ -195,9 +189,16 @@
     return a;
   }
 
-  function track(eventName, params) {
-    if (typeof window.gtag !== 'function') return;
-    try { window.gtag('event', eventName, params || {}); } catch (err) {}
+  // Sandbox with no win/lose: one game_start per session on the first
+  // meaningful interaction; game_end (quit, coins, duration) comes from the
+  // shared script's pagehide beacon.
+  var runStarted = false;
+  function beginSession() {
+    if (runStarted) return;
+    runStarted = true;
+    if (window.embedAnalytics) {
+      window.embedAnalytics.startRun('Pixel Garden', function () { return state.coins; });
+    }
   }
 
   function sp(id) {
@@ -323,7 +324,7 @@
       state.sel = s.id;
       renderUI();
       save();
-      track('select_seed', { seed_name: s.id });
+      beginSession();
     });
     seedsEl.appendChild(btn);
     seedBtns.push({ id: s.id, cost: s.cost, el: btn });
@@ -359,7 +360,7 @@
       if (state.coins >= s.cost) {
         state.coins -= s.cost;
         state.plots[i] = { sp: s.id, progress: 0 };
-        track('plant_seed', { seed_name: s.id, cost: s.cost });
+        beginSession();
       }
     } else {
       var st = stageOf(p).stage;
@@ -367,11 +368,11 @@
         var sb = sp(p.sp);
         state.coins += sb.yld;
         state.plots[i] = null;
-        track('harvest_bloom', { seed_name: sb.id, coins_earned: sb.yld });
+        beginSession();
       } else if (st === 'weed') {
         state.coins += 2;
         state.plots[i] = null;
-        track('clear_weed', { coins_earned: 2 });
+        beginSession();
       } else {
         return;
       }
