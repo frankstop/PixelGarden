@@ -27,15 +27,15 @@ Branch: **main** / **/ (root)**. The site publishes at
 
 ## Analytics
 
-Google Analytics (GA4, measurement ID `G-RSVR6Y389R`) is loaded in `index.html`.
-Page views are collected automatically; gameplay also fires custom events:
+Analytics are handled by the shared `embed-analytics.js` loaded in
+`index.html` from `https://frankiejvaldez.com/assets/js/embed-analytics.js`
+(GA4 measurement ID `G-RSVR6Y389R`). Page views are collected automatically;
+gameplay uses the portfolio-wide event contract:
 
 | Event | Fires when | Parameters |
 | --- | --- | --- |
-| `plant_seed` | A seed is planted in an empty plot | `seed_name`, `cost` |
-| `harvest_bloom` | A fully bloomed plant is harvested | `seed_name`, `coins_earned` |
-| `clear_weed` | An overgrown plot is cleared | `coins_earned` |
-| `select_seed` | A different seed type is selected in the picker | `seed_name` |
+| `game_start` | First meaningful interaction of a session (select, plant, harvest, or weed) | `game_name` |
+| `game_end` | Leaving or backgrounding the page after playing | `game_name`, `outcome` (`quit`), `score` (coins), `duration_seconds` |
 
 ## Cheat
  https://frankstop.github.io/PixelGarden/?speed=60
